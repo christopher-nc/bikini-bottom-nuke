@@ -73,10 +73,10 @@ jobs:
         aws-secret-access-key: ${{ steps.root_creds.outputs.aws-secret-access-key }}
         aws-session-token: ${{ steps.root_creds.outputs.aws-session-token }}
         
-    - name: Run Nuke Anaconda
-      run: |
-        aws-nuke -c config.yml -q
-      continue-on-error: true
+    # - name: Run Nuke Anaconda
+    #   run: |
+    #     aws-nuke -c config.yml -q
+    #   continue-on-error: true
 
     - name: Notify
       if: ${{ failure() }}
