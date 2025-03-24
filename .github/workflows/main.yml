@@ -1,0 +1,90 @@
+name: 'Nuke'
+
+on:
+  schedule:
+    - cron:  '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      DryRun:
+        description: 'Run the Nuke job in report mode'
+        required: true
+        default: 'Report'
+        type: choice
+        options:
+        - Nuke
+        - Report
+      tags:
+        description: 'Test scenario tags'
+        required: false
+        type: boolean
+      environment:
+        description: 'Environment to run tests against'
+        default: 'production'
+        type: environment
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  cleanup:
+    name: 'Cleanup'
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      
+    - name: Configure AWS credentials
+      id: root_creds
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.oidc_role }}
+        aws-region: us-west-2
+        output-credentials: true
+
+    - name: Create Data File
+      run: |
+        echo '{"accounts":[${{ vars.TARGET_ACCOUNT }}],"blocked_account":"${{ vars.BLOCKED_ACCOUNT }}"}' >> data.json
+        
+    - name: Create Config
+      uses: ajeffowens/jinja2-action@90dab3da2215932ea86d2875224f06bbd6798617
+      with:
+        template: config.yml.j2
+        output_file: config.yml
+        data_file: data.json
+        data_format: json
+
+    - name: Install Nuke
+      run: |
+        AWS_NUKE_VERSION=v2.25.0 sh -c 'wget -c https://github.com/rebuy-de/aws-nuke/releases/download/$AWS_NUKE_VERSION/aws-nuke-$AWS_NUKE_VERSION-linux-amd64.tar.gz -O - | sudo tar -xz && sudo mv aws-nuke-$AWS_NUKE_VERSION-linux-amd64 /usr/local/bin/aws-nuke'
+
+    - name: Configure other AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-region: us-west-2
+        role-to-assume: ${{ secrets.aft_nuke_role }}
+        aws-access-key-id: ${{ steps.root_creds.outputs.aws-access-key-id }}
+        aws-secret-access-key: ${{ steps.root_creds.outputs.aws-secret-access-key }}
+        aws-session-token: ${{ steps.root_creds.outputs.aws-session-token }}
+        
+    - name: Run Nuke Anaconda
+      run: |
+        aws-nuke -c config.yml -q
+      continue-on-error: true
+
+    - name: Notify
+      if: ${{ failure() }}
+      uses: umahmood/pushover-actions@main
+      env:
+        PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
+        PUSHOVER_USER: ${{ secrets.PUSHOVER_USER_TOKEN }}
+      with:
+        status: ${{ job.status }}
+        title: 'Nuke-My-Shit Failure'
+        message: 'The automated Github action has encountered a failure'
